@@ -5,6 +5,7 @@ authors = ["Aslan Gurtsiev"]
 edition = "2021"
 rust-version = "1.70"
 description = "Safe, idiomatic Rust bindings for the JVM Tool Interface (JVMTI)"
+repository = "https://github.com/jvtmi2-rs/jvmti2"
 license = "MIT OR Apache-2.0"
 keywords = ["jvm", "jvmti", "java", "jni", "agent"]
 categories = ["api-bindings", "development-tools::profiling"]
