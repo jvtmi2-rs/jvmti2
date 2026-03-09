@@ -1,0 +1,16 @@
+[package]
+name = "jvmti2"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Safe, idiomatic Rust bindings for the JVM Tool Interface (JVMTI)"
+license = "MIT OR Apache-2.0"
+keywords = ["jvm", "jvmti", "java", "jni", "agent"]
+categories = ["api-bindings", "development-tools::profiling"]
+
+[dependencies]
+jni = "0.22.3"
+jni-sys = "0.4.1"
+jvmti2-sys = { version = "0.1.2", path = "../jvmti2-sys" }
+thiserror = "2"
+bitflags = "2"
