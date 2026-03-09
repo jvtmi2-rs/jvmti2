@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "jvmti2"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bitflags",
  "jni",
@@ -93,6 +93,8 @@ dependencies = [
 [[package]]
 name = "jvmti2-sys"
 version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c105a6026fb006fcadaf73efe89c4c44f1278a35d9f8f491bdab18c1e919e09"
 dependencies = [
  "bitflags",
  "jni-sys",
