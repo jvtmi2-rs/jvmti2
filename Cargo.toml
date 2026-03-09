@@ -1,3 +1,13 @@
+[workspace]
+members = [
+    ".",
+    "examples/jvmti-tracing",
+    "examples/jvmti-class-watcher",
+    "examples/jvmti-native-spy",
+    "examples/jvmti-field-guard",
+    "examples/jvmti-android-recon",
+]
+
 [package]
 name = "jvmti2"
 version = "0.0.1"

@@ -1,0 +1,19 @@
+[package]
+name = "jvmti-native-spy"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "jvmti_native_spy_agent"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "jvmti-native-spy"
+path = "src/main.rs"
+
+[dependencies]
+jvmti2 = { path = "../.." }
+jni = { version = "0.22", features = ["invocation"] }
+jni-sys = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

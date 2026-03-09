@@ -1,0 +1,19 @@
+[package]
+name = "jvmti-android-recon"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "jvmti_android_recon_agent"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "jvmti-android-recon"
+path = "src/main.rs"
+
+[dependencies]
+jvmti2 = { path = "../.." }
+jni = { version = "0.22", features = ["invocation"] }
+jni-sys = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
