@@ -2,11 +2,10 @@
 
 use core::ffi::c_void;
 
-use jni::sys::jint;
-use jni_sys::{jclass, jobject};
+use jni_sys::jint;
 
 use super::Env;
-use crate::sys;
+use crate::{sys, JClass, JObject};
 
 impl<'local> Env<'local> {
     /// Forces a garbage collection.
@@ -41,7 +40,7 @@ impl<'local> Env<'local> {
     /// duration of the iteration.
     pub unsafe fn iterate_over_instances_of_class(
         &self,
-        klass: jclass,
+        klass: &JClass<'_>,
         object_filter: sys::jvmtiHeapObjectFilter,
         callback: sys::jvmtiHeapObjectCallback,
         user_data: *const c_void,
@@ -51,7 +50,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 IterateOverInstancesOfClass,
-                klass,
+                klass.as_raw(),
                 object_filter,
                 callback,
                 user_data
@@ -72,13 +71,13 @@ impl<'local> Env<'local> {
     pub unsafe fn follow_references(
         &self,
         heap_filter: jint,
-        klass: Option<jclass>,
-        initial_object: Option<jobject>,
+        klass: Option<&JClass<'_>>,
+        initial_object: Option<&JObject<'_>>,
         callbacks: &sys::jvmtiHeapCallbacks,
         user_data: *const c_void,
     ) -> crate::Result<()> {
-        let klass_raw = klass.unwrap_or(core::ptr::null_mut());
-        let initial_raw = initial_object.unwrap_or(core::ptr::null_mut());
+        let klass_raw = klass.map_or(core::ptr::null_mut(), |c| c.as_raw());
+        let initial_raw = initial_object.map_or(core::ptr::null_mut(), |o| o.as_raw());
         unsafe {
             jvmti_call_check!(
                 self,
@@ -105,11 +104,11 @@ impl<'local> Env<'local> {
     pub unsafe fn iterate_through_heap(
         &self,
         heap_filter: jint,
-        klass: Option<jclass>,
+        klass: Option<&JClass<'_>>,
         callbacks: &sys::jvmtiHeapCallbacks,
         user_data: *const c_void,
     ) -> crate::Result<()> {
-        let klass_raw = klass.unwrap_or(core::ptr::null_mut());
+        let klass_raw = klass.map_or(core::ptr::null_mut(), |c| c.as_raw());
         unsafe {
             jvmti_call_check!(
                 self,

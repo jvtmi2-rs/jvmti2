@@ -2,8 +2,7 @@
 
 use core::ffi::c_void;
 
-use jni::sys::jint;
-use jni_sys::jobject;
+use jni_sys::{jint, jobject};
 
 use super::Env;
 use crate::{
@@ -72,9 +71,9 @@ impl<'local> Env<'local> {
     pub fn stop_thread(
         &self,
         thread: &JThread<'_>,
-        exception: jobject,
+        exception: &jni::objects::JObject<'_>,
     ) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, StopThread, thread.as_raw(), exception) };
+        unsafe { jvmti_call_check!(self, v1, StopThread, thread.as_raw(), exception.as_raw()) };
         Ok(())
     }
 

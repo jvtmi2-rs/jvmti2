@@ -5,7 +5,7 @@
 
 use std::ffi::{c_void, CStr};
 
-use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode};
+use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode, JMethodID, JThread};
 
 /// Event handler that logs native method bind events using `tracing`.
 struct NativeSpyHandler;
@@ -13,24 +13,24 @@ struct NativeSpyHandler;
 impl EventHandler for NativeSpyHandler {
     fn native_method_bind(
         &self,
-        env: &Env<'_>,
-        _thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &Env<'_>,
+        _jni_env: Option<&mut jni::EnvUnowned<'_>>,
+        _thread: &JThread<'_>,
+        method: JMethodID,
         address: *mut c_void,
-        new_address_ptr: *mut *mut c_void,
-    ) {
-        if let Ok(desc) = describe_method(env, method) {
-            let can_redirect = !new_address_ptr.is_null();
-            tracing::info!("[BIND] {desc} -> {address:?} (redirect={can_redirect})");
+    ) -> Option<*mut c_void> {
+        if let Ok(desc) = describe_method(jvmti_env, method) {
+            tracing::info!("[BIND] {desc} -> {address:?}");
         }
+        None
     }
 }
 
-/// Build a human-readable `ClassName.methodName(sig)` string from a jmethodID.
-fn describe_method(env: &Env<'_>, method: jni_sys::jmethodID) -> jvmti2::Result<String> {
+/// Build a human-readable `ClassName.methodName(sig)` string from a JMethodID.
+fn describe_method(env: &Env<'_>, method: JMethodID) -> jvmti2::Result<String> {
     let (name, sig, _generic) = env.get_method_name(method)?;
     let klass = env.get_method_declaring_class(method)?;
-    let (class_sig, _generic) = env.get_class_signature(klass)?;
+    let (class_sig, _generic) = env.get_class_signature(&klass)?;
 
     // class_sig is like "Ljava/util/ArrayList;" — strip L prefix and ; suffix,
     // and replace '/' with '.'

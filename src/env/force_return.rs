@@ -1,9 +1,10 @@
 //! Force early return methods.
 
-use jni_sys::{jdouble, jfloat, jint, jlong, jobject};
+
+use jni_sys::{jdouble, jfloat, jint, jlong};
 
 use super::Env;
-use crate::objects::JThread;
+use crate::{JObject, JThread};
 
 impl<'local> Env<'local> {
     /// Forces early return of an object from the currently executing method.
@@ -15,11 +16,11 @@ impl<'local> Env<'local> {
     pub fn force_early_return_object(
         &self,
         thread: Option<&JThread<'_>>,
-        value: jobject,
+        value: &JObject<'_>,
     ) -> crate::Result<()> {
         let thread_raw = thread.map_or(core::ptr::null_mut(), |t| t.as_raw());
         unsafe {
-            jvmti_call_check!(self, v1_1, ForceEarlyReturnObject, thread_raw, value)
+            jvmti_call_check!(self, v1_1, ForceEarlyReturnObject, thread_raw, value.as_raw())
         };
         Ok(())
     }

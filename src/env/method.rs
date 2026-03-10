@@ -2,11 +2,10 @@
 
 use core::ffi::{c_char, c_uchar};
 
-use jni::sys::jint;
-use jni_sys::{jboolean, jclass, jmethodID};
+use jni_sys::{jboolean, jint};
 
 use super::Env;
-use crate::{memory::{JvmtiArray, JvmtiString}, sys};
+use crate::{memory::{JvmtiArray, JvmtiString}, sys, JClass, JMethodID};
 
 impl<'local> Env<'local> {
     /// Returns the name, signature, and generic signature of a method.
@@ -15,7 +14,7 @@ impl<'local> Env<'local> {
     /// may be `None`.
     pub fn get_method_name(
         &self,
-        method: jmethodID,
+        method: JMethodID,
     ) -> crate::Result<(JvmtiString, JvmtiString, Option<JvmtiString>)> {
         let mut name_ptr: *mut c_char = core::ptr::null_mut();
         let mut sig_ptr: *mut c_char = core::ptr::null_mut();
@@ -25,7 +24,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetMethodName,
-                method,
+                method.into_raw(),
                 &mut name_ptr,
                 &mut sig_ptr,
                 &mut gen_ptr
@@ -42,32 +41,32 @@ impl<'local> Env<'local> {
     }
 
     /// Returns the class that declared a method.
-    pub fn get_method_declaring_class(&self, method: jmethodID) -> crate::Result<jclass> {
-        let mut klass: jclass = core::ptr::null_mut();
+    pub fn get_method_declaring_class(&self, method: JMethodID) -> crate::Result<JClass<'local>> {
+        let mut klass: jni_sys::jclass = core::ptr::null_mut();
         unsafe {
-            jvmti_call_check!(self, v1, GetMethodDeclaringClass, method, &mut klass)
+            jvmti_call_check!(self, v1, GetMethodDeclaringClass, method.into_raw(), &mut klass)
         };
-        Ok(klass)
+        Ok(unsafe { crate::objects::jclass_from_raw(klass) })
     }
 
     /// Returns the modifiers of a method.
-    pub fn get_method_modifiers(&self, method: jmethodID) -> crate::Result<jint> {
+    pub fn get_method_modifiers(&self, method: JMethodID) -> crate::Result<jint> {
         let mut modifiers: jint = 0;
-        unsafe { jvmti_call_check!(self, v1, GetMethodModifiers, method, &mut modifiers) };
+        unsafe { jvmti_call_check!(self, v1, GetMethodModifiers, method.into_raw(), &mut modifiers) };
         Ok(modifiers)
     }
 
     /// Returns the maximum number of local variable slots used by a method.
-    pub fn get_max_locals(&self, method: jmethodID) -> crate::Result<jint> {
+    pub fn get_max_locals(&self, method: JMethodID) -> crate::Result<jint> {
         let mut max: jint = 0;
-        unsafe { jvmti_call_check!(self, v1, GetMaxLocals, method, &mut max) };
+        unsafe { jvmti_call_check!(self, v1, GetMaxLocals, method.into_raw(), &mut max) };
         Ok(max)
     }
 
     /// Returns the number of words used by the method's arguments.
-    pub fn get_arguments_size(&self, method: jmethodID) -> crate::Result<jint> {
+    pub fn get_arguments_size(&self, method: JMethodID) -> crate::Result<jint> {
         let mut size: jint = 0;
-        unsafe { jvmti_call_check!(self, v1, GetArgumentsSize, method, &mut size) };
+        unsafe { jvmti_call_check!(self, v1, GetArgumentsSize, method.into_raw(), &mut size) };
         Ok(size)
     }
 
@@ -77,7 +76,7 @@ impl<'local> Env<'local> {
     /// - `can_get_line_numbers`
     pub fn get_line_number_table(
         &self,
-        method: jmethodID,
+        method: JMethodID,
     ) -> crate::Result<JvmtiArray<sys::jvmtiLineNumberEntry>> {
         let mut count: jint = 0;
         let mut table_ptr: *mut sys::jvmtiLineNumberEntry = core::ptr::null_mut();
@@ -86,7 +85,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetLineNumberTable,
-                method,
+                method.into_raw(),
                 &mut count,
                 &mut table_ptr
             )
@@ -99,12 +98,12 @@ impl<'local> Env<'local> {
     /// Returns `(start_location, end_location)`.
     pub fn get_method_location(
         &self,
-        method: jmethodID,
+        method: JMethodID,
     ) -> crate::Result<(jni_sys::jlong, jni_sys::jlong)> {
         let mut start: jni_sys::jlong = 0;
         let mut end: jni_sys::jlong = 0;
         unsafe {
-            jvmti_call_check!(self, v1, GetMethodLocation, method, &mut start, &mut end)
+            jvmti_call_check!(self, v1, GetMethodLocation, method.into_raw(), &mut start, &mut end)
         };
         Ok((start, end))
     }
@@ -115,7 +114,7 @@ impl<'local> Env<'local> {
     /// - `can_access_local_variables`
     pub fn get_local_variable_table(
         &self,
-        method: jmethodID,
+        method: JMethodID,
     ) -> crate::Result<JvmtiArray<sys::jvmtiLocalVariableEntry>> {
         let mut count: jint = 0;
         let mut table_ptr: *mut sys::jvmtiLocalVariableEntry = core::ptr::null_mut();
@@ -124,7 +123,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetLocalVariableTable,
-                method,
+                method.into_raw(),
                 &mut count,
                 &mut table_ptr
             )
@@ -136,7 +135,7 @@ impl<'local> Env<'local> {
     ///
     /// # Required Capabilities
     /// - `can_get_bytecodes`
-    pub fn get_bytecodes(&self, method: jmethodID) -> crate::Result<JvmtiArray<c_uchar>> {
+    pub fn get_bytecodes(&self, method: JMethodID) -> crate::Result<JvmtiArray<c_uchar>> {
         let mut count: jint = 0;
         let mut bytecodes_ptr: *mut c_uchar = core::ptr::null_mut();
         unsafe {
@@ -144,7 +143,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetBytecodes,
-                method,
+                method.into_raw(),
                 &mut count,
                 &mut bytecodes_ptr
             )
@@ -153,9 +152,9 @@ impl<'local> Env<'local> {
     }
 
     /// Returns whether a method is native.
-    pub fn is_method_native(&self, method: jmethodID) -> crate::Result<bool> {
+    pub fn is_method_native(&self, method: JMethodID) -> crate::Result<bool> {
         let mut result: jboolean = false;
-        unsafe { jvmti_call_check!(self, v1, IsMethodNative, method, &mut result) };
+        unsafe { jvmti_call_check!(self, v1, IsMethodNative, method.into_raw(), &mut result) };
         Ok(result)
     }
 
@@ -163,17 +162,17 @@ impl<'local> Env<'local> {
     ///
     /// # Required Capabilities
     /// - `can_get_synthetic_attribute`
-    pub fn is_method_synthetic(&self, method: jmethodID) -> crate::Result<bool> {
+    pub fn is_method_synthetic(&self, method: JMethodID) -> crate::Result<bool> {
         let mut result: jboolean = false;
-        unsafe { jvmti_call_check!(self, v1, IsMethodSynthetic, method, &mut result) };
+        unsafe { jvmti_call_check!(self, v1, IsMethodSynthetic, method.into_raw(), &mut result) };
         Ok(result)
     }
 
     /// Returns whether a method is obsolete (has been replaced by
     /// `RedefineClasses`).
-    pub fn is_method_obsolete(&self, method: jmethodID) -> crate::Result<bool> {
+    pub fn is_method_obsolete(&self, method: JMethodID) -> crate::Result<bool> {
         let mut result: jboolean = false;
-        unsafe { jvmti_call_check!(self, v1, IsMethodObsolete, method, &mut result) };
+        unsafe { jvmti_call_check!(self, v1, IsMethodObsolete, method.into_raw(), &mut result) };
         Ok(result)
     }
 }

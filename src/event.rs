@@ -8,8 +8,9 @@
 //!   and install it via [`Env::install_event_handler`](crate::Env::install_event_handler).
 //!   Uses `dyn` dispatch (one vtable lookup per event invocation).
 
-use core::ffi::{c_char, c_void};
+use core::ffi::{c_char, c_void, CStr};
 
+use crate::objects::{jclass_from_raw, jobject_from_raw, JClass, JFieldID, JMethodID, JObject, JThread};
 use crate::sys;
 
 /// Builder for raw event callbacks.
@@ -174,16 +175,21 @@ impl EventCallbacksBuilder {
 /// You must still enable each desired event with
 /// [`Env::set_event_notification_mode`](crate::Env::set_event_notification_mode).
 ///
+/// Most callbacks receive both a `jvmti_env` ([`Env`](crate::Env)) for JVMTI
+/// operations and a `jni_env` ([`jni::EnvUnowned`]) for JNI calls. Use
+/// [`jni_env.with_env(|env| { ... })`](jni::EnvUnowned::with_env) to access
+/// the full [`jni::Env`] API inside the closure.
+///
 /// # Example
 ///
 /// ```no_run
-/// use jvmti2::event::EventHandler;
-/// use jvmti2::Env;
+/// use jvmti2::{event::EventHandler, Env, JMethodID, JThread};
 ///
 /// struct MyHandler;
 ///
 /// impl EventHandler for MyHandler {
-///     fn vm_init(&self, _env: &Env<'_>, _thread: jni_sys::jobject) {
+///     fn vm_init(&self, _jvmti_env: &Env<'_>, _jni_env: &mut jni::EnvUnowned<'_>,
+///                _thread: &JThread<'_>) {
 ///         println!("VM initialized!");
 ///     }
 /// }
@@ -191,263 +197,320 @@ impl EventCallbacksBuilder {
 #[allow(unused_variables, clippy::too_many_arguments)]
 pub trait EventHandler: Send + Sync + 'static {
     /// VM initialization complete.
-    fn vm_init(&self, env: &crate::Env<'_>, thread: jni_sys::jobject) {}
+    fn vm_init(
+        &self,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+    ) {
+    }
     /// VM about to terminate.
-    fn vm_death(&self, env: &crate::Env<'_>) {}
+    fn vm_death(&self, jvmti_env: &crate::Env<'_>, jni_env: &mut jni::EnvUnowned<'_>) {}
     /// A thread has started.
-    fn thread_start(&self, env: &crate::Env<'_>, thread: jni_sys::jobject) {}
+    fn thread_start(
+        &self,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+    ) {
+    }
     /// A thread has ended.
-    fn thread_end(&self, env: &crate::Env<'_>, thread: jni_sys::jobject) {}
+    fn thread_end(
+        &self,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+    ) {
+    }
     /// A class file is being loaded; the handler may transform the bytecode.
     ///
-    /// # Note
-    ///
-    /// `new_class_data` is typed as `*mut *mut c_uint` due to a jvmti2-sys bug
-    /// (should be `*mut *mut c_uchar`). Cast appropriately if you need to set it.
+    /// Return `Some(bytes)` with replacement bytecode to transform the class,
+    /// or `None` to leave it unchanged. The trampoline handles JVMTI memory
+    /// allocation for the returned bytes.
     fn class_file_load_hook(
         &self,
-        env: &crate::Env<'_>,
-        class_being_redefined: jni_sys::jclass,
-        loader: jni_sys::jobject,
-        name: *const c_char,
-        protection_domain: jni_sys::jobject,
-        class_data_len: jni_sys::jint,
-        class_data: *const core::ffi::c_uchar,
-        new_class_data_len: *mut jni_sys::jint,
-        new_class_data: *mut *mut core::ffi::c_uint,
-    ) {
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        class_being_redefined: Option<&JClass<'_>>,
+        loader: Option<&JObject<'_>>,
+        name: Option<&str>,
+        protection_domain: &JObject<'_>,
+        class_data: &[u8],
+    ) -> Option<Vec<u8>> {
+        None
     }
     /// A class has been loaded.
     fn class_load(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        klass: jni_sys::jclass,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        klass: &JClass<'_>,
     ) {
     }
     /// A class has been prepared.
     fn class_prepare(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        klass: jni_sys::jclass,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        klass: &JClass<'_>,
     ) {
     }
     /// VM has started (JNI available, but not fully initialized).
-    fn vm_start(&self, env: &crate::Env<'_>) {}
+    fn vm_start(&self, jvmti_env: &crate::Env<'_>, jni_env: &mut jni::EnvUnowned<'_>) {}
     /// An exception was thrown.
     fn exception(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
         location: sys::jlocation,
-        exception: jni_sys::jobject,
-        catch_method: jni_sys::jmethodID,
+        exception: &JObject<'_>,
+        catch_method: Option<JMethodID>,
         catch_location: sys::jlocation,
     ) {
     }
     /// An exception was caught.
     fn exception_catch(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
         location: sys::jlocation,
-        exception: jni_sys::jobject,
+        exception: Option<&JObject<'_>>,
     ) {
     }
     /// A single step event.
     fn single_step(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
         location: sys::jlocation,
     ) {
     }
     /// A frame was popped.
     fn frame_pop(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
-        was_popped_by_exception: jni_sys::jboolean,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
+        was_popped_by_exception: bool,
     ) {
     }
     /// A breakpoint was hit.
     fn breakpoint(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
         location: sys::jlocation,
     ) {
     }
     /// A field was accessed (read).
     fn field_access(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
         location: sys::jlocation,
-        field_klass: jni_sys::jclass,
-        object: jni_sys::jobject,
-        field: jni_sys::jfieldID,
+        field_klass: &JClass<'_>,
+        object: Option<&JObject<'_>>,
+        field: JFieldID,
     ) {
     }
     /// A field was modified (written).
     fn field_modification(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
         location: sys::jlocation,
-        field_klass: jni_sys::jclass,
-        object: jni_sys::jobject,
-        field: jni_sys::jfieldID,
-        signature_type: c_char,
+        field_klass: &JClass<'_>,
+        object: Option<&JObject<'_>>,
+        field: JFieldID,
+        signature_type: char,
         new_value: jni_sys::jvalue,
     ) {
     }
     /// Method was entered.
     fn method_entry(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
     ) {
     }
     /// Method was exited.
     fn method_exit(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
-        was_popped_by_exception: jni_sys::jboolean,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        method: JMethodID,
+        was_popped_by_exception: bool,
         return_value: jni_sys::jvalue,
     ) {
     }
     /// A native method is being bound to its implementation.
+    ///
+    /// Return `Some(address)` to redirect the native method to a different
+    /// implementation, or `None` to leave it unchanged.
+    ///
+    /// `jni_env` may be `None` during the primordial phase before JNI is ready.
     fn native_method_bind(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: Option<&mut jni::EnvUnowned<'_>>,
+        thread: &JThread<'_>,
+        method: JMethodID,
         address: *mut c_void,
-        new_address_ptr: *mut *mut c_void,
-    ) {
+    ) -> Option<*mut c_void> {
+        None
     }
     /// A compiled method has been loaded into memory.
     ///
-    /// # Note
-    ///
-    /// Due to a jvmti2-sys bug, the second C parameter is typed as `*mut JNIEnv`
-    /// but is actually a `jmethodID`. The trampoline casts it correctly before
-    /// calling this method, so `method` is valid.
+    /// This event does not receive a JNI environment.
     fn compiled_method_load(
         &self,
-        env: &crate::Env<'_>,
-        method: jni_sys::jmethodID,
-        code_size: jni_sys::jint,
-        code_addr: *const c_void,
-        map_length: jni_sys::jint,
-        map: *const sys::jvmtiAddrLocationMap,
+        jvmti_env: &crate::Env<'_>,
+        method: JMethodID,
+        code: &[u8],
+        map: Option<&[sys::jvmtiAddrLocationMap]>,
         compile_info: *const c_void,
     ) {
     }
     /// A compiled method has been unloaded from memory.
+    ///
+    /// This event does not receive a JNI environment.
     fn compiled_method_unload(
         &self,
-        env: &crate::Env<'_>,
-        method: jni_sys::jmethodID,
+        jvmti_env: &crate::Env<'_>,
+        method: JMethodID,
         code_addr: *const c_void,
     ) {
     }
     /// Dynamically generated code was loaded.
+    ///
+    /// This event does not receive a JNI environment.
     fn dynamic_code_generated(
         &self,
-        env: &crate::Env<'_>,
-        name: *const c_char,
+        jvmti_env: &crate::Env<'_>,
+        name: &str,
         address: *const c_void,
         length: jni_sys::jint,
     ) {
     }
     /// The VM received a data dump request (e.g., Ctrl+Break).
-    fn data_dump_request(&self, env: &crate::Env<'_>) {}
+    ///
+    /// This event does not receive a JNI environment.
+    fn data_dump_request(&self, jvmti_env: &crate::Env<'_>) {}
     /// A thread is about to wait on a monitor.
     fn monitor_wait(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        object: jni_sys::jobject,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        object: &JObject<'_>,
         timeout: jni_sys::jlong,
     ) {
     }
     /// A thread finished waiting on a monitor.
     fn monitor_waited(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        object: jni_sys::jobject,
-        timed_out: jni_sys::jboolean,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        object: &JObject<'_>,
+        timed_out: bool,
     ) {
     }
     /// A thread is about to enter a contended monitor.
     fn monitor_contended_enter(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        object: jni_sys::jobject,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        object: &JObject<'_>,
     ) {
     }
     /// A thread entered a contended monitor.
     fn monitor_contended_entered(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        object: jni_sys::jobject,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        object: &JObject<'_>,
     ) {
     }
     /// A resource has been exhausted (OOM, thread limit, etc.).
     fn resource_exhausted(
         &self,
-        env: &crate::Env<'_>,
-        flags: sys::JVMTI_RESOURCE_EXHAUSTED_FLAGS,
-        reserved: *const c_void,
-        description: *const c_char,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        flags: crate::sys::JVMTI_RESOURCE_EXHAUSTED_FLAGS,
+        description: &str,
     ) {
     }
     /// Garbage collection started.
-    fn garbage_collection_start(&self, env: &crate::Env<'_>) {}
+    ///
+    /// This event does not receive a JNI environment.
+    fn garbage_collection_start(&self, jvmti_env: &crate::Env<'_>) {}
     /// Garbage collection finished.
-    fn garbage_collection_finish(&self, env: &crate::Env<'_>) {}
+    ///
+    /// This event does not receive a JNI environment.
+    fn garbage_collection_finish(&self, jvmti_env: &crate::Env<'_>) {}
     /// A tagged object was freed.
-    fn object_free(&self, env: &crate::Env<'_>, tag: jni_sys::jlong) {}
+    ///
+    /// This event does not receive a JNI environment.
+    fn object_free(&self, jvmti_env: &crate::Env<'_>, tag: jni_sys::jlong) {}
     /// The VM allocated an object.
     fn vm_object_alloc(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        object: jni_sys::jobject,
-        object_klass: jni_sys::jclass,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        object: &JObject<'_>,
+        object_klass: &JClass<'_>,
         size: jni_sys::jlong,
     ) {
     }
     /// A sampled object allocation occurred (JVMTI 11+).
     fn sampled_object_alloc(
         &self,
-        env: &crate::Env<'_>,
-        thread: jni_sys::jobject,
-        object: jni_sys::jobject,
-        object_class: jni_sys::jclass,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+        object: &JObject<'_>,
+        object_class: &JClass<'_>,
         size: jni_sys::jlong,
     ) {
     }
     /// A virtual thread started (JVMTI 21+).
-    fn virtual_thread_start(&self, env: &crate::Env<'_>, thread: jni_sys::jobject) {}
+    fn virtual_thread_start(
+        &self,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+    ) {
+    }
     /// A virtual thread ended (JVMTI 21+).
-    fn virtual_thread_end(&self, env: &crate::Env<'_>, thread: jni_sys::jobject) {}
+    fn virtual_thread_end(
+        &self,
+        jvmti_env: &crate::Env<'_>,
+        jni_env: &mut jni::EnvUnowned<'_>,
+        thread: &JThread<'_>,
+    ) {
+    }
 }
 
 // ── Callback state and trampolines ───────────────────────────────────
@@ -486,42 +549,60 @@ unsafe fn trampoline_env(
     core::mem::ManuallyDrop::new(crate::Env::from_raw(jvmti_env, state.vm))
 }
 
-// Trampolines for events that receive (jvmti_env, jni_env, ...).
-macro_rules! trampoline_jni {
-    (fn $name:ident($($param:ident: $ty:ty),*) => $method:ident) => {
-        unsafe extern "system" fn $name(
-            jvmti_env: *mut sys::jvmtiEnv,
-            _jni_env: *mut jni_sys::JNIEnv,
-            $($param: $ty),*
-        ) {
-            let state = &*get_callback_state(jvmti_env);
-            let env = trampoline_env(jvmti_env, state);
-            state.handler.$method(&env $(, $param)*);
-        }
-    };
+// ── Hand-written trampolines ─────────────────────────────────────────
+//
+// Each trampoline converts raw C types to idiomatic Rust types before
+// calling the handler method.
+
+unsafe extern "system" fn tramp_vm_init(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    state.handler.vm_init(&env, &mut jni_env_w, &thread_w);
 }
 
-// Trampolines for events that receive (jvmti_env, ...) without jni_env.
-macro_rules! trampoline_raw {
-    (fn $name:ident($($param:ident: $ty:ty),*) => $method:ident) => {
-        unsafe extern "system" fn $name(
-            jvmti_env: *mut sys::jvmtiEnv,
-            $($param: $ty),*
-        ) {
-            let state = &*get_callback_state(jvmti_env);
-            let env = trampoline_env(jvmti_env, state);
-            state.handler.$method(&env $(, $param)*);
-        }
-    };
+unsafe extern "system" fn tramp_vm_death(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    state.handler.vm_death(&env, &mut jni_env_w);
 }
 
-// ── v1 events with jni_env ───────────────────────────────────────────
+unsafe extern "system" fn tramp_thread_start(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    state.handler.thread_start(&env, &mut jni_env_w, &thread_w);
+}
 
-trampoline_jni! { fn tramp_vm_init(thread: jni_sys::jobject) => vm_init }
-trampoline_jni! { fn tramp_vm_death() => vm_death }
-trampoline_jni! { fn tramp_thread_start(thread: jni_sys::jobject) => thread_start }
-trampoline_jni! { fn tramp_thread_end(thread: jni_sys::jobject) => thread_end }
-trampoline_jni! { fn tramp_class_file_load_hook(
+unsafe extern "system" fn tramp_thread_end(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    state.handler.thread_end(&env, &mut jni_env_w, &thread_w);
+}
+
+unsafe extern "system" fn tramp_class_file_load_hook(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     class_being_redefined: jni_sys::jclass,
     loader: jni_sys::jobject,
     name: *const c_char,
@@ -529,53 +610,259 @@ trampoline_jni! { fn tramp_class_file_load_hook(
     class_data_len: jni_sys::jint,
     class_data: *const core::ffi::c_uchar,
     new_class_data_len: *mut jni_sys::jint,
-    new_class_data: *mut *mut core::ffi::c_uint
-) => class_file_load_hook }
-trampoline_jni! { fn tramp_class_load(
-    thread: jni_sys::jobject, klass: jni_sys::jclass
-) => class_load }
-trampoline_jni! { fn tramp_class_prepare(
-    thread: jni_sys::jobject, klass: jni_sys::jclass
-) => class_prepare }
-trampoline_jni! { fn tramp_vm_start() => vm_start }
-trampoline_jni! { fn tramp_exception(
+    new_class_data: *mut *mut core::ffi::c_uint,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+
+    let class_redef = if class_being_redefined.is_null() {
+        None
+    } else {
+        Some(unsafe { jclass_from_raw(class_being_redefined) })
+    };
+    let loader_w = if loader.is_null() {
+        None
+    } else {
+        Some(unsafe { jobject_from_raw(loader) })
+    };
+    let name_str = if name.is_null() {
+        None
+    } else {
+        let cstr = unsafe { CStr::from_ptr(name) };
+        Some(cstr.to_str().unwrap_or("<invalid utf8>"))
+    };
+    let prot_domain = unsafe { jobject_from_raw(protection_domain) };
+    let data = unsafe { core::slice::from_raw_parts(class_data, class_data_len as usize) };
+
+    let result = state.handler.class_file_load_hook(
+        &env,
+        &mut jni_env_w,
+        class_redef.as_ref(),
+        loader_w.as_ref(),
+        name_str,
+        &prot_domain,
+        data,
+    );
+
+    if let Some(new_bytes) = result {
+        // Allocate JVMTI memory for the replacement bytecode.
+        let interface = unsafe { *jvmti_env };
+        let mut buf: *mut core::ffi::c_uchar = core::ptr::null_mut();
+        let ret = unsafe {
+            ((*interface).v1.Allocate)(
+                jvmti_env,
+                new_bytes.len() as jni_sys::jlong,
+                &mut buf,
+            )
+        };
+        if ret == sys::jvmtiError::JVMTI_ERROR_NONE && !buf.is_null() {
+            unsafe {
+                core::ptr::copy_nonoverlapping(new_bytes.as_ptr(), buf, new_bytes.len());
+                *new_class_data_len = new_bytes.len() as jni_sys::jint;
+                // NOTE: new_class_data is typed as *mut *mut c_uint due to jvmti2-sys bug
+                // but should be *mut *mut c_uchar. Cast through.
+                *(new_class_data as *mut *mut core::ffi::c_uchar) = buf;
+            }
+        }
+    }
+}
+
+unsafe extern "system" fn tramp_class_load(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    klass: jni_sys::jclass,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let klass_w = unsafe { jclass_from_raw(klass) };
+    state
+        .handler
+        .class_load(&env, &mut jni_env_w, &thread_w, &klass_w);
+}
+
+unsafe extern "system" fn tramp_class_prepare(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    klass: jni_sys::jclass,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let klass_w = unsafe { jclass_from_raw(klass) };
+    state
+        .handler
+        .class_prepare(&env, &mut jni_env_w, &thread_w, &klass_w);
+}
+
+unsafe extern "system" fn tramp_vm_start(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    state.handler.vm_start(&env, &mut jni_env_w);
+}
+
+unsafe extern "system" fn tramp_exception(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
     location: sys::jlocation,
     exception: jni_sys::jobject,
     catch_method: jni_sys::jmethodID,
-    catch_location: sys::jlocation
-) => exception }
-trampoline_jni! { fn tramp_exception_catch(
+    catch_location: sys::jlocation,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    let exception_w = unsafe { jobject_from_raw(exception) };
+    let catch_method_w = if catch_method.is_null() {
+        None
+    } else {
+        Some(unsafe { JMethodID::from_raw(catch_method) })
+    };
+    state.handler.exception(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        method_w,
+        location,
+        &exception_w,
+        catch_method_w,
+        catch_location,
+    );
+}
+
+unsafe extern "system" fn tramp_exception_catch(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
     location: sys::jlocation,
-    exception: jni_sys::jobject
-) => exception_catch }
-trampoline_jni! { fn tramp_single_step(
+    exception: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    let exception_w = if exception.is_null() {
+        None
+    } else {
+        Some(unsafe { jobject_from_raw(exception) })
+    };
+    state.handler.exception_catch(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        method_w,
+        location,
+        exception_w.as_ref(),
+    );
+}
+
+unsafe extern "system" fn tramp_single_step(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
-    location: sys::jlocation
-) => single_step }
-trampoline_jni! { fn tramp_frame_pop(
+    location: sys::jlocation,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    state
+        .handler
+        .single_step(&env, &mut jni_env_w, &thread_w, method_w, location);
+}
+
+unsafe extern "system" fn tramp_frame_pop(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
-    was_popped_by_exception: jni_sys::jboolean
-) => frame_pop }
-trampoline_jni! { fn tramp_breakpoint(
+    was_popped_by_exception: jni_sys::jboolean,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    state.handler.frame_pop(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        method_w,
+        was_popped_by_exception,
+    );
+}
+
+unsafe extern "system" fn tramp_breakpoint(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
-    location: sys::jlocation
-) => breakpoint }
-trampoline_jni! { fn tramp_field_access(
+    location: sys::jlocation,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    state
+        .handler
+        .breakpoint(&env, &mut jni_env_w, &thread_w, method_w, location);
+}
+
+unsafe extern "system" fn tramp_field_access(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
     location: sys::jlocation,
     field_klass: jni_sys::jclass,
     object: jni_sys::jobject,
-    field: jni_sys::jfieldID
-) => field_access }
-trampoline_jni! { fn tramp_field_modification(
+    field: jni_sys::jfieldID,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    let field_klass_w = unsafe { jclass_from_raw(field_klass) };
+    let object_w = if object.is_null() {
+        None
+    } else {
+        Some(unsafe { jobject_from_raw(object) })
+    };
+    let field_w = unsafe { JFieldID::from_raw(field) };
+    state.handler.field_access(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        method_w,
+        location,
+        &field_klass_w,
+        object_w.as_ref(),
+        field_w,
+    );
+}
+
+unsafe extern "system" fn tramp_field_modification(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
     location: sys::jlocation,
@@ -583,61 +870,107 @@ trampoline_jni! { fn tramp_field_modification(
     object: jni_sys::jobject,
     field: jni_sys::jfieldID,
     signature_type: c_char,
-    new_value: jni_sys::jvalue
-) => field_modification }
-trampoline_jni! { fn tramp_method_entry(
-    thread: jni_sys::jobject, method: jni_sys::jmethodID
-) => method_entry }
-trampoline_jni! { fn tramp_method_exit(
+    new_value: jni_sys::jvalue,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    let field_klass_w = unsafe { jclass_from_raw(field_klass) };
+    let object_w = if object.is_null() {
+        None
+    } else {
+        Some(unsafe { jobject_from_raw(object) })
+    };
+    let field_w = unsafe { JFieldID::from_raw(field) };
+    let sig_char = (signature_type as u8) as char;
+    state.handler.field_modification(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        method_w,
+        location,
+        &field_klass_w,
+        object_w.as_ref(),
+        field_w,
+        sig_char,
+        new_value,
+    );
+}
+
+unsafe extern "system" fn tramp_method_entry(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    method: jni_sys::jmethodID,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    state
+        .handler
+        .method_entry(&env, &mut jni_env_w, &thread_w, method_w);
+}
+
+unsafe extern "system" fn tramp_method_exit(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
     was_popped_by_exception: jni_sys::jboolean,
-    return_value: jni_sys::jvalue
-) => method_exit }
-trampoline_jni! { fn tramp_native_method_bind(
+    return_value: jni_sys::jvalue,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    state.handler.method_exit(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        method_w,
+        was_popped_by_exception,
+        return_value,
+    );
+}
+
+unsafe extern "system" fn tramp_native_method_bind(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     method: jni_sys::jmethodID,
     address: *mut c_void,
-    new_address_ptr: *mut *mut c_void
-) => native_method_bind }
-trampoline_jni! { fn tramp_monitor_wait(
-    thread: jni_sys::jobject,
-    object: jni_sys::jobject,
-    timeout: jni_sys::jlong
-) => monitor_wait }
-trampoline_jni! { fn tramp_monitor_waited(
-    thread: jni_sys::jobject,
-    object: jni_sys::jobject,
-    timed_out: jni_sys::jboolean
-) => monitor_waited }
-trampoline_jni! { fn tramp_monitor_contended_enter(
-    thread: jni_sys::jobject, object: jni_sys::jobject
-) => monitor_contended_enter }
-trampoline_jni! { fn tramp_monitor_contended_entered(
-    thread: jni_sys::jobject, object: jni_sys::jobject
-) => monitor_contended_entered }
-trampoline_jni! { fn tramp_vm_object_alloc(
-    thread: jni_sys::jobject,
-    object: jni_sys::jobject,
-    object_klass: jni_sys::jclass,
-    size: jni_sys::jlong
-) => vm_object_alloc }
-
-// ── v1 events WITHOUT jni_env ────────────────────────────────────────
-
-trampoline_raw! { fn tramp_data_dump_request() => data_dump_request }
-trampoline_raw! { fn tramp_gc_start() => garbage_collection_start }
-trampoline_raw! { fn tramp_gc_finish() => garbage_collection_finish }
-trampoline_raw! { fn tramp_object_free(tag: jni_sys::jlong) => object_free }
-trampoline_raw! { fn tramp_compiled_method_unload(
-    method: jni_sys::jmethodID, code_addr: *const c_void
-) => compiled_method_unload }
-trampoline_raw! { fn tramp_dynamic_code_generated(
-    name: *const c_char, address: *const c_void, length: jni_sys::jint
-) => dynamic_code_generated }
+    new_address_ptr: *mut *mut c_void,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_opt = if jni_env.is_null() {
+        None
+    } else {
+        Some(unsafe { jni::EnvUnowned::from_raw(jni_env) })
+    };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    let result = state.handler.native_method_bind(
+        &env,
+        jni_env_opt.as_mut(),
+        &thread_w,
+        method_w,
+        address,
+    );
+    if let Some(new_addr) = result {
+        unsafe { *new_address_ptr = new_addr };
+    }
+}
 
 unsafe extern "system" fn tramp_compiled_method_load(
     jvmti_env: *mut sys::jvmtiEnv,
+    // NOTE: Due to a jvmti2-sys bug, this second C parameter is typed as
+    // `*mut JNIEnv` but is actually a `jmethodID`. We cast it here.
     method: jni_sys::jmethodID,
     code_size: jni_sys::jint,
     code_addr: *const c_void,
@@ -647,32 +980,241 @@ unsafe extern "system" fn tramp_compiled_method_load(
 ) {
     let state = unsafe { &*get_callback_state(jvmti_env) };
     let env = unsafe { trampoline_env(jvmti_env, state) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    let code = unsafe { core::slice::from_raw_parts(code_addr as *const u8, code_size as usize) };
+    let map_slice = if map.is_null() || map_length <= 0 {
+        None
+    } else {
+        Some(unsafe { core::slice::from_raw_parts(map, map_length as usize) })
+    };
     state
         .handler
-        .compiled_method_load(&env, method, code_size, code_addr, map_length, map, compile_info);
+        .compiled_method_load(&env, method_w, code, map_slice, compile_info);
 }
 
-// ── v1_1 events ──────────────────────────────────────────────────────
+unsafe extern "system" fn tramp_compiled_method_unload(
+    jvmti_env: *mut sys::jvmtiEnv,
+    method: jni_sys::jmethodID,
+    code_addr: *const c_void,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let method_w = unsafe { JMethodID::from_raw(method) };
+    state
+        .handler
+        .compiled_method_unload(&env, method_w, code_addr);
+}
 
-trampoline_jni! { fn tramp_resource_exhausted(
+unsafe extern "system" fn tramp_dynamic_code_generated(
+    jvmti_env: *mut sys::jvmtiEnv,
+    name: *const c_char,
+    address: *const c_void,
+    length: jni_sys::jint,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let name_str = if name.is_null() {
+        "<null>"
+    } else {
+        unsafe { CStr::from_ptr(name) }
+            .to_str()
+            .unwrap_or("<invalid utf8>")
+    };
+    state
+        .handler
+        .dynamic_code_generated(&env, name_str, address, length);
+}
+
+unsafe extern "system" fn tramp_data_dump_request(jvmti_env: *mut sys::jvmtiEnv) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    state.handler.data_dump_request(&env);
+}
+
+unsafe extern "system" fn tramp_monitor_wait(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    object: jni_sys::jobject,
+    timeout: jni_sys::jlong,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let object_w = unsafe { jobject_from_raw(object) };
+    state
+        .handler
+        .monitor_wait(&env, &mut jni_env_w, &thread_w, &object_w, timeout);
+}
+
+unsafe extern "system" fn tramp_monitor_waited(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    object: jni_sys::jobject,
+    timed_out: jni_sys::jboolean,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let object_w = unsafe { jobject_from_raw(object) };
+    state
+        .handler
+        .monitor_waited(&env, &mut jni_env_w, &thread_w, &object_w, timed_out);
+}
+
+unsafe extern "system" fn tramp_monitor_contended_enter(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    object: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let object_w = unsafe { jobject_from_raw(object) };
+    state
+        .handler
+        .monitor_contended_enter(&env, &mut jni_env_w, &thread_w, &object_w);
+}
+
+unsafe extern "system" fn tramp_monitor_contended_entered(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    object: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let object_w = unsafe { jobject_from_raw(object) };
+    state
+        .handler
+        .monitor_contended_entered(&env, &mut jni_env_w, &thread_w, &object_w);
+}
+
+unsafe extern "system" fn tramp_resource_exhausted(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     flags: sys::JVMTI_RESOURCE_EXHAUSTED_FLAGS,
-    reserved: *const c_void,
-    description: *const c_char
-) => resource_exhausted }
+    _reserved: *const c_void,
+    description: *const c_char,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let desc = if description.is_null() {
+        "<null>"
+    } else {
+        unsafe { CStr::from_ptr(description) }
+            .to_str()
+            .unwrap_or("<invalid utf8>")
+    };
+    state
+        .handler
+        .resource_exhausted(&env, &mut jni_env_w, flags, desc);
+}
 
-// ── v11 events ───────────────────────────────────────────────────────
+unsafe extern "system" fn tramp_gc_start(jvmti_env: *mut sys::jvmtiEnv) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    state.handler.garbage_collection_start(&env);
+}
 
-trampoline_jni! { fn tramp_sampled_object_alloc(
+unsafe extern "system" fn tramp_gc_finish(jvmti_env: *mut sys::jvmtiEnv) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    state.handler.garbage_collection_finish(&env);
+}
+
+unsafe extern "system" fn tramp_object_free(
+    jvmti_env: *mut sys::jvmtiEnv,
+    tag: jni_sys::jlong,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    state.handler.object_free(&env, tag);
+}
+
+unsafe extern "system" fn tramp_vm_object_alloc(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+    object: jni_sys::jobject,
+    object_klass: jni_sys::jclass,
+    size: jni_sys::jlong,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let object_w = unsafe { jobject_from_raw(object) };
+    let klass_w = unsafe { jclass_from_raw(object_klass) };
+    state.handler.vm_object_alloc(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        &object_w,
+        &klass_w,
+        size,
+    );
+}
+
+unsafe extern "system" fn tramp_sampled_object_alloc(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
     thread: jni_sys::jobject,
     object: jni_sys::jobject,
     object_class: jni_sys::jclass,
-    size: jni_sys::jlong
-) => sampled_object_alloc }
+    size: jni_sys::jlong,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    let object_w = unsafe { jobject_from_raw(object) };
+    let klass_w = unsafe { jclass_from_raw(object_class) };
+    state.handler.sampled_object_alloc(
+        &env,
+        &mut jni_env_w,
+        &thread_w,
+        &object_w,
+        &klass_w,
+        size,
+    );
+}
 
-// ── v21 events ───────────────────────────────────────────────────────
+unsafe extern "system" fn tramp_virtual_thread_start(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    state
+        .handler
+        .virtual_thread_start(&env, &mut jni_env_w, &thread_w);
+}
 
-trampoline_jni! { fn tramp_virtual_thread_start(thread: jni_sys::jobject) => virtual_thread_start }
-trampoline_jni! { fn tramp_virtual_thread_end(thread: jni_sys::jobject) => virtual_thread_end }
+unsafe extern "system" fn tramp_virtual_thread_end(
+    jvmti_env: *mut sys::jvmtiEnv,
+    jni_env: *mut jni_sys::JNIEnv,
+    thread: jni_sys::jobject,
+) {
+    let state = unsafe { &*get_callback_state(jvmti_env) };
+    let env = unsafe { trampoline_env(jvmti_env, state) };
+    let mut jni_env_w = unsafe { jni::EnvUnowned::from_raw(jni_env) };
+    let thread_w = unsafe { JThread::from_raw(thread) };
+    state
+        .handler
+        .virtual_thread_end(&env, &mut jni_env_w, &thread_w);
+}
 
 // ── Installation ─────────────────────────────────────────────────────
 

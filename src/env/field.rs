@@ -2,11 +2,10 @@
 
 use core::ffi::c_char;
 
-use jni::sys::jint;
-use jni_sys::{jboolean, jclass, jfieldID};
+use jni_sys::{jboolean, jint};
 
 use super::Env;
-use crate::memory::JvmtiString;
+use crate::{memory::JvmtiString, JClass, JFieldID};
 
 impl<'local> Env<'local> {
     /// Returns the name, signature, and generic signature of a field.
@@ -15,8 +14,8 @@ impl<'local> Env<'local> {
     /// may be `None`.
     pub fn get_field_name(
         &self,
-        klass: jclass,
-        field: jfieldID,
+        klass: &JClass<'_>,
+        field: JFieldID,
     ) -> crate::Result<(JvmtiString, JvmtiString, Option<JvmtiString>)> {
         let mut name_ptr: *mut c_char = core::ptr::null_mut();
         let mut sig_ptr: *mut c_char = core::ptr::null_mut();
@@ -26,8 +25,8 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetFieldName,
-                klass,
-                field,
+                klass.as_raw(),
+                field.into_raw(),
                 &mut name_ptr,
                 &mut sig_ptr,
                 &mut gen_ptr
@@ -46,32 +45,32 @@ impl<'local> Env<'local> {
     /// Returns the class that declared a field.
     pub fn get_field_declaring_class(
         &self,
-        klass: jclass,
-        field: jfieldID,
-    ) -> crate::Result<jclass> {
-        let mut declaring_class: jclass = core::ptr::null_mut();
+        klass: &JClass<'_>,
+        field: JFieldID,
+    ) -> crate::Result<JClass<'local>> {
+        let mut declaring_class: jni_sys::jclass = core::ptr::null_mut();
         unsafe {
             jvmti_call_check!(
                 self,
                 v1,
                 GetFieldDeclaringClass,
-                klass,
-                field,
+                klass.as_raw(),
+                field.into_raw(),
                 &mut declaring_class
             )
         };
-        Ok(declaring_class)
+        Ok(unsafe { crate::objects::jclass_from_raw(declaring_class) })
     }
 
     /// Returns the modifiers of a field.
     pub fn get_field_modifiers(
         &self,
-        klass: jclass,
-        field: jfieldID,
+        klass: &JClass<'_>,
+        field: JFieldID,
     ) -> crate::Result<jint> {
         let mut modifiers: jint = 0;
         unsafe {
-            jvmti_call_check!(self, v1, GetFieldModifiers, klass, field, &mut modifiers)
+            jvmti_call_check!(self, v1, GetFieldModifiers, klass.as_raw(), field.into_raw(), &mut modifiers)
         };
         Ok(modifiers)
     }
@@ -82,12 +81,12 @@ impl<'local> Env<'local> {
     /// - `can_get_synthetic_attribute`
     pub fn is_field_synthetic(
         &self,
-        klass: jclass,
-        field: jfieldID,
+        klass: &JClass<'_>,
+        field: JFieldID,
     ) -> crate::Result<bool> {
         let mut result: jboolean = false;
         unsafe {
-            jvmti_call_check!(self, v1, IsFieldSynthetic, klass, field, &mut result)
+            jvmti_call_check!(self, v1, IsFieldSynthetic, klass.as_raw(), field.into_raw(), &mut result)
         };
         Ok(result)
     }

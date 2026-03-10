@@ -1,19 +1,18 @@
 //! Object operations methods.
 
-use jni::sys::jint;
-use jni_sys::{jlong, jobject};
+use jni_sys::{jint, jlong, jobject};
 
 use super::Env;
-use crate::{memory::JvmtiArray, sys};
+use crate::{memory::JvmtiArray, sys, JObject};
 
 impl<'local> Env<'local> {
     /// Returns the tag associated with an object.
     ///
     /// # Required Capabilities
     /// - `can_tag_objects`
-    pub fn get_tag(&self, object: jobject) -> crate::Result<jlong> {
+    pub fn get_tag(&self, object: &JObject<'_>) -> crate::Result<jlong> {
         let mut tag: jlong = 0;
-        unsafe { jvmti_call_check!(self, v1, GetTag, object, &mut tag) };
+        unsafe { jvmti_call_check!(self, v1, GetTag, object.as_raw(), &mut tag) };
         Ok(tag)
     }
 
@@ -21,22 +20,22 @@ impl<'local> Env<'local> {
     ///
     /// # Required Capabilities
     /// - `can_tag_objects`
-    pub fn set_tag(&self, object: jobject, tag: jlong) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, SetTag, object, tag) };
+    pub fn set_tag(&self, object: &JObject<'_>, tag: jlong) -> crate::Result<()> {
+        unsafe { jvmti_call_check!(self, v1, SetTag, object.as_raw(), tag) };
         Ok(())
     }
 
     /// Returns the hash code of an object.
-    pub fn get_object_hash_code(&self, object: jobject) -> crate::Result<jint> {
+    pub fn get_object_hash_code(&self, object: &JObject<'_>) -> crate::Result<jint> {
         let mut hash: jint = 0;
-        unsafe { jvmti_call_check!(self, v1, GetObjectHashCode, object, &mut hash) };
+        unsafe { jvmti_call_check!(self, v1, GetObjectHashCode, object.as_raw(), &mut hash) };
         Ok(hash)
     }
 
     /// Returns the size of an object in bytes.
-    pub fn get_object_size(&self, object: jobject) -> crate::Result<jlong> {
+    pub fn get_object_size(&self, object: &JObject<'_>) -> crate::Result<jlong> {
         let mut size: jlong = 0;
-        unsafe { jvmti_call_check!(self, v1, GetObjectSize, object, &mut size) };
+        unsafe { jvmti_call_check!(self, v1, GetObjectSize, object.as_raw(), &mut size) };
         Ok(size)
     }
 
@@ -46,10 +45,10 @@ impl<'local> Env<'local> {
     /// - `can_get_monitor_info`
     pub fn get_object_monitor_usage(
         &self,
-        object: jobject,
+        object: &JObject<'_>,
     ) -> crate::Result<sys::jvmtiMonitorUsage> {
         let mut usage = unsafe { core::mem::zeroed::<sys::jvmtiMonitorUsage>() };
-        unsafe { jvmti_call_check!(self, v1, GetObjectMonitorUsage, object, &mut usage) };
+        unsafe { jvmti_call_check!(self, v1, GetObjectMonitorUsage, object.as_raw(), &mut usage) };
         Ok(usage)
     }
 

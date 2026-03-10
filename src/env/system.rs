@@ -2,7 +2,7 @@
 
 use core::ffi::{c_char, CStr};
 
-use jni::sys::{jint, jlong};
+use jni_sys::{jint, jlong};
 
 use super::Env;
 use crate::{

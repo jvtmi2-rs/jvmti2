@@ -1,10 +1,9 @@
 //! Local variable access methods.
 
-use jni::sys::jint;
-use jni_sys::{jdouble, jfloat, jlong, jobject};
+use jni_sys::{jdouble, jfloat, jint, jlong, jobject};
 
 use super::Env;
-use crate::objects::JThread;
+use crate::{JObject, JThread};
 
 impl<'local> Env<'local> {
     /// Gets a local object variable, or `None` if the value is Java `null`.
@@ -158,11 +157,11 @@ impl<'local> Env<'local> {
         thread: Option<&JThread<'_>>,
         depth: jint,
         slot: jint,
-        value: jobject,
+        value: &JObject<'_>,
     ) -> crate::Result<()> {
         let thread_raw = thread.map_or(core::ptr::null_mut(), |t| t.as_raw());
         unsafe {
-            jvmti_call_check!(self, v1, SetLocalObject, thread_raw, depth, slot, value)
+            jvmti_call_check!(self, v1, SetLocalObject, thread_raw, depth, slot, value.as_raw())
         };
         Ok(())
     }

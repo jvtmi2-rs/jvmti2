@@ -1,9 +1,7 @@
 //! Breakpoint and watchpoint methods.
 
-use jni_sys::{jclass, jfieldID, jmethodID};
-
 use super::Env;
-use crate::sys;
+use crate::{sys, JClass, JFieldID, JMethodID};
 
 impl<'local> Env<'local> {
     /// Sets a breakpoint at a given location.
@@ -12,10 +10,10 @@ impl<'local> Env<'local> {
     /// - `can_generate_breakpoint_events`
     pub fn set_breakpoint(
         &self,
-        method: jmethodID,
+        method: JMethodID,
         location: sys::jlocation,
     ) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, SetBreakpoint, method, location) };
+        unsafe { jvmti_call_check!(self, v1, SetBreakpoint, method.into_raw(), location) };
         Ok(())
     }
 
@@ -25,10 +23,10 @@ impl<'local> Env<'local> {
     /// - `can_generate_breakpoint_events`
     pub fn clear_breakpoint(
         &self,
-        method: jmethodID,
+        method: JMethodID,
         location: sys::jlocation,
     ) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, ClearBreakpoint, method, location) };
+        unsafe { jvmti_call_check!(self, v1, ClearBreakpoint, method.into_raw(), location) };
         Ok(())
     }
 
@@ -38,10 +36,10 @@ impl<'local> Env<'local> {
     /// - `can_generate_field_access_events`
     pub fn set_field_access_watch(
         &self,
-        klass: jclass,
-        field: jfieldID,
+        klass: &JClass<'_>,
+        field: JFieldID,
     ) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, SetFieldAccessWatch, klass, field) };
+        unsafe { jvmti_call_check!(self, v1, SetFieldAccessWatch, klass.as_raw(), field.into_raw()) };
         Ok(())
     }
 
@@ -51,10 +49,10 @@ impl<'local> Env<'local> {
     /// - `can_generate_field_access_events`
     pub fn clear_field_access_watch(
         &self,
-        klass: jclass,
-        field: jfieldID,
+        klass: &JClass<'_>,
+        field: JFieldID,
     ) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, ClearFieldAccessWatch, klass, field) };
+        unsafe { jvmti_call_check!(self, v1, ClearFieldAccessWatch, klass.as_raw(), field.into_raw()) };
         Ok(())
     }
 
@@ -64,10 +62,10 @@ impl<'local> Env<'local> {
     /// - `can_generate_field_modification_events`
     pub fn set_field_modification_watch(
         &self,
-        klass: jclass,
-        field: jfieldID,
+        klass: &JClass<'_>,
+        field: JFieldID,
     ) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, SetFieldModificationWatch, klass, field) };
+        unsafe { jvmti_call_check!(self, v1, SetFieldModificationWatch, klass.as_raw(), field.into_raw()) };
         Ok(())
     }
 
@@ -77,10 +75,10 @@ impl<'local> Env<'local> {
     /// - `can_generate_field_modification_events`
     pub fn clear_field_modification_watch(
         &self,
-        klass: jclass,
-        field: jfieldID,
+        klass: &JClass<'_>,
+        field: JFieldID,
     ) -> crate::Result<()> {
-        unsafe { jvmti_call_check!(self, v1, ClearFieldModificationWatch, klass, field) };
+        unsafe { jvmti_call_check!(self, v1, ClearFieldModificationWatch, klass.as_raw(), field.into_raw()) };
         Ok(())
     }
 }

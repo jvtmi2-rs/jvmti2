@@ -4,27 +4,39 @@
 //! status flags, source file, method count, and class loader info.
 
 use std::ffi::CStr;
-use jvmti2::{agent_onload, Env, Event, EventHandler, EventMode};
+use jvmti2::{agent_onload, Env, Event, EventHandler, EventMode, JClass, JThread};
 
 struct ClassWatcherHandler;
 
 impl EventHandler for ClassWatcherHandler {
-    fn class_load(&self, env: &Env<'_>, _thread: jni_sys::jobject, klass: jni_sys::jclass) {
-        if let Ok((sig, _generic)) = env.get_class_signature(klass) {
+    fn class_load(
+        &self,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+        klass: &JClass<'_>,
+    ) {
+        if let Ok((sig, _generic)) = jvmti_env.get_class_signature(klass) {
             let name = format_class_name(&sig.to_string_lossy());
             tracing::info!("[LOAD] {name}");
         }
     }
 
-    fn class_prepare(&self, env: &Env<'_>, _thread: jni_sys::jobject, klass: jni_sys::jclass) {
-        let Ok((sig, _generic)) = env.get_class_signature(klass) else { return };
+    fn class_prepare(
+        &self,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+        klass: &JClass<'_>,
+    ) {
+        let Ok((sig, _generic)) = jvmti_env.get_class_signature(klass) else { return };
         let name = format_class_name(&sig.to_string_lossy());
-        let status = env.get_class_status(klass).map(|s| format!("{s:?}")).unwrap_or_default();
-        let methods = env.get_class_methods(klass).map(|m| m.len()).unwrap_or(0);
-        let source = env.get_source_file_name(klass)
+        let status = jvmti_env.get_class_status(klass).map(|s| format!("{s:?}")).unwrap_or_default();
+        let methods = jvmti_env.get_class_methods(klass).map(|m| m.len()).unwrap_or(0);
+        let source = jvmti_env.get_source_file_name(klass)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|_| "<unknown>".into());
-        let loader = match env.get_class_loader(klass) {
+        let loader = match jvmti_env.get_class_loader(klass) {
             Ok(Some(loader)) => format!("{loader:?}"),
             Ok(None) => "bootstrap".into(),
             Err(_) => "<error>".into(),

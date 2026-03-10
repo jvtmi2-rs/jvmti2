@@ -2,8 +2,7 @@
 
 use core::ffi::{c_char, CStr};
 
-use jni::sys::jint;
-use jni_sys::JNINativeInterface_;
+use jni_sys::{jint, JNINativeInterface_};
 
 use super::Env;
 

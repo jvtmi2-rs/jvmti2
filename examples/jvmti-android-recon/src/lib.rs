@@ -9,7 +9,7 @@
 
 use std::ffi::{c_void, CStr};
 
-use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode};
+use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode, JMethodID, JThread};
 
 /// Security-interesting class prefixes and their category tags.
 const WATCH_PREFIXES: &[(&str, &str)] = &[
@@ -38,11 +38,12 @@ struct ReconHandler;
 impl EventHandler for ReconHandler {
     fn method_entry(
         &self,
-        env: &Env<'_>,
-        _thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+        method: JMethodID,
     ) {
-        let Ok(full_name) = describe_method(env, method) else { return };
+        let Ok(full_name) = describe_method(jvmti_env, method) else { return };
 
         for &(prefix, tag) in WATCH_PREFIXES {
             if full_name.starts_with(prefix) {
@@ -54,22 +55,23 @@ impl EventHandler for ReconHandler {
 
     fn native_method_bind(
         &self,
-        env: &Env<'_>,
-        _thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &Env<'_>,
+        _jni_env: Option<&mut jni::EnvUnowned<'_>>,
+        _thread: &JThread<'_>,
+        method: JMethodID,
         address: *mut c_void,
-        _new_address_ptr: *mut *mut c_void,
-    ) {
-        if let Ok(desc) = describe_method(env, method) {
+    ) -> Option<*mut c_void> {
+        if let Ok(desc) = describe_method(jvmti_env, method) {
             tracing::info!("[NATIVE] {desc} -> {address:?}");
         }
+        None
     }
 }
 
-fn describe_method(env: &Env<'_>, method: jni_sys::jmethodID) -> jvmti2::Result<String> {
+fn describe_method(env: &Env<'_>, method: JMethodID) -> jvmti2::Result<String> {
     let (name, _sig, _generic) = env.get_method_name(method)?;
     let klass = env.get_method_declaring_class(method)?;
-    let (class_sig, _generic) = env.get_class_signature(klass)?;
+    let (class_sig, _generic) = env.get_class_signature(&klass)?;
     let class_name = class_sig.to_string_lossy();
     let class_name = class_name.strip_prefix('L').unwrap_or(&class_name);
     let class_name = class_name.strip_suffix(';').unwrap_or(class_name).replace('/', ".");

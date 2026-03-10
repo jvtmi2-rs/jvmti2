@@ -30,7 +30,7 @@
 //!
 //! ```no_run
 //! use std::ffi::CStr;
-//! use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode};
+//! use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode, JMethodID, JThread};
 //!
 //! // 1. Define a handler struct that implements the EventHandler trait.
 //! //    You only need to override the callbacks you care about; the rest
@@ -40,12 +40,13 @@
 //! impl EventHandler for MyHandler {
 //!     fn method_entry(
 //!         &self,
-//!         env: &Env<'_>,
-//!         _thread: jni_sys::jobject,
-//!         method: jni_sys::jmethodID,
+//!         jvmti_env: &Env<'_>,
+//!         _jni_env: &mut jni::EnvUnowned<'_>,
+//!         _thread: &JThread<'_>,
+//!         method: JMethodID,
 //!     ) {
 //!         // Resolve the method name for display.
-//!         if let Ok((name, _sig, _generic)) = env.get_method_name(method) {
+//!         if let Ok((name, _sig, _generic)) = jvmti_env.get_method_name(method) {
 //!             eprintln!(">> {name}");
 //!         }
 //!     }

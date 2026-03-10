@@ -1,10 +1,9 @@
 //! Stack trace methods.
 
-use jni::sys::jint;
-use jni_sys::{jmethodID, jobject};
+use jni_sys::{jint, jobject};
 
 use super::Env;
-use crate::{memory::JvmtiArray, objects::JThread, sys};
+use crate::{memory::JvmtiArray, sys, JMethodID, JThread};
 
 impl<'local> Env<'local> {
     /// Returns the number of frames on a thread's stack.
@@ -26,9 +25,9 @@ impl<'local> Env<'local> {
         &self,
         thread: Option<&JThread<'_>>,
         depth: jint,
-    ) -> crate::Result<(jmethodID, jni_sys::jlong)> {
+    ) -> crate::Result<(JMethodID, jni_sys::jlong)> {
         let thread_raw = thread.map_or(core::ptr::null_mut(), |t| t.as_raw());
-        let mut method: jmethodID = core::ptr::null_mut();
+        let mut method: jni_sys::jmethodID = core::ptr::null_mut();
         let mut location: jni_sys::jlong = 0;
         unsafe {
             jvmti_call_check!(
@@ -41,7 +40,7 @@ impl<'local> Env<'local> {
                 &mut location
             )
         };
-        Ok((method, location))
+        Ok((unsafe { JMethodID::from_raw(method) }, location))
     }
 
     /// Returns a thread's stack trace.

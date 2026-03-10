@@ -4,7 +4,7 @@
 
 use std::ffi::CStr;
 
-use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode};
+use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode, JMethodID, JThread};
 
 /// Event handler that logs method entry and exit using `tracing`.
 struct TracingHandler;
@@ -12,34 +12,36 @@ struct TracingHandler;
 impl EventHandler for TracingHandler {
     fn method_entry(
         &self,
-        env: &Env<'_>,
-        _thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+        method: JMethodID,
     ) {
-        if let Ok(desc) = describe_method(env, method) {
+        if let Ok(desc) = describe_method(jvmti_env, method) {
             tracing::info!(">> {desc}");
         }
     }
 
     fn method_exit(
         &self,
-        env: &Env<'_>,
-        _thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
-        _was_popped_by_exception: jni_sys::jboolean,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+        method: JMethodID,
+        _was_popped_by_exception: bool,
         _return_value: jni_sys::jvalue,
     ) {
-        if let Ok(desc) = describe_method(env, method) {
+        if let Ok(desc) = describe_method(jvmti_env, method) {
             tracing::info!("<< {desc}");
         }
     }
 }
 
-/// Build a human-readable `ClassName.methodName` string from a jmethodID.
-fn describe_method(env: &Env<'_>, method: jni_sys::jmethodID) -> jvmti2::Result<String> {
+/// Build a human-readable `ClassName.methodName` string from a JMethodID.
+fn describe_method(env: &Env<'_>, method: JMethodID) -> jvmti2::Result<String> {
     let (name, _sig, _generic) = env.get_method_name(method)?;
     let klass = env.get_method_declaring_class(method)?;
-    let (class_sig, _generic) = env.get_class_signature(klass)?;
+    let (class_sig, _generic) = env.get_class_signature(&klass)?;
 
     // class_sig is like "Ljava/util/ArrayList;" — strip L prefix and ; suffix,
     // and replace '/' with '.'

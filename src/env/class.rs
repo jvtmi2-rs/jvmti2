@@ -2,14 +2,13 @@
 
 use core::ffi::{c_char, c_uchar};
 
-use jni::sys::jint;
-use jni_sys::{jboolean, jclass, jfieldID, jmethodID, jobject};
+use jni_sys::{jboolean, jclass, jfieldID, jint, jmethodID, jobject};
 
 use super::Env;
 use crate::{
     flags::ClassStatus,
     memory::{JvmtiArray, JvmtiString},
-    sys,
+    sys, JClass, JObject,
 };
 
 impl<'local> Env<'local> {
@@ -19,7 +18,7 @@ impl<'local> Env<'local> {
     /// `None` if the class has no generic signature.
     pub fn get_class_signature(
         &self,
-        klass: jclass,
+        klass: &JClass<'_>,
     ) -> crate::Result<(JvmtiString, Option<JvmtiString>)> {
         let mut sig_ptr: *mut c_char = core::ptr::null_mut();
         let mut gen_ptr: *mut c_char = core::ptr::null_mut();
@@ -28,7 +27,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetClassSignature,
-                klass,
+                klass.as_raw(),
                 &mut sig_ptr,
                 &mut gen_ptr
             )
@@ -43,9 +42,9 @@ impl<'local> Env<'local> {
     }
 
     /// Returns the status of a class.
-    pub fn get_class_status(&self, klass: jclass) -> crate::Result<ClassStatus> {
+    pub fn get_class_status(&self, klass: &JClass<'_>) -> crate::Result<ClassStatus> {
         let mut status: jint = 0;
-        unsafe { jvmti_call_check!(self, v1, GetClassStatus, klass, &mut status) };
+        unsafe { jvmti_call_check!(self, v1, GetClassStatus, klass.as_raw(), &mut status) };
         Ok(ClassStatus::from_bits_truncate(status as u32))
     }
 
@@ -53,35 +52,35 @@ impl<'local> Env<'local> {
     ///
     /// # Required Capabilities
     /// - `can_get_source_file_name`
-    pub fn get_source_file_name(&self, klass: jclass) -> crate::Result<JvmtiString> {
+    pub fn get_source_file_name(&self, klass: &JClass<'_>) -> crate::Result<JvmtiString> {
         let mut name_ptr: *mut c_char = core::ptr::null_mut();
-        unsafe { jvmti_call_check!(self, v1, GetSourceFileName, klass, &mut name_ptr) };
+        unsafe { jvmti_call_check!(self, v1, GetSourceFileName, klass.as_raw(), &mut name_ptr) };
         Ok(unsafe { JvmtiString::new(name_ptr, self.raw) })
     }
 
     /// Returns the modifiers of a class (as a bitmask of JVM access flags).
-    pub fn get_class_modifiers(&self, klass: jclass) -> crate::Result<jint> {
+    pub fn get_class_modifiers(&self, klass: &JClass<'_>) -> crate::Result<jint> {
         let mut modifiers: jint = 0;
-        unsafe { jvmti_call_check!(self, v1, GetClassModifiers, klass, &mut modifiers) };
+        unsafe { jvmti_call_check!(self, v1, GetClassModifiers, klass.as_raw(), &mut modifiers) };
         Ok(modifiers)
     }
 
     /// Returns the methods declared in a class.
-    pub fn get_class_methods(&self, klass: jclass) -> crate::Result<JvmtiArray<jmethodID>> {
+    pub fn get_class_methods(&self, klass: &JClass<'_>) -> crate::Result<JvmtiArray<jmethodID>> {
         let mut count: jint = 0;
         let mut methods_ptr: *mut jmethodID = core::ptr::null_mut();
         unsafe {
-            jvmti_call_check!(self, v1, GetClassMethods, klass, &mut count, &mut methods_ptr)
+            jvmti_call_check!(self, v1, GetClassMethods, klass.as_raw(), &mut count, &mut methods_ptr)
         };
         Ok(unsafe { JvmtiArray::new(methods_ptr, count, self.raw) })
     }
 
     /// Returns the fields declared in a class.
-    pub fn get_class_fields(&self, klass: jclass) -> crate::Result<JvmtiArray<jfieldID>> {
+    pub fn get_class_fields(&self, klass: &JClass<'_>) -> crate::Result<JvmtiArray<jfieldID>> {
         let mut count: jint = 0;
         let mut fields_ptr: *mut jfieldID = core::ptr::null_mut();
         unsafe {
-            jvmti_call_check!(self, v1, GetClassFields, klass, &mut count, &mut fields_ptr)
+            jvmti_call_check!(self, v1, GetClassFields, klass.as_raw(), &mut count, &mut fields_ptr)
         };
         Ok(unsafe { JvmtiArray::new(fields_ptr, count, self.raw) })
     }
@@ -89,7 +88,7 @@ impl<'local> Env<'local> {
     /// Returns the interfaces directly implemented by a class.
     pub fn get_implemented_interfaces(
         &self,
-        klass: jclass,
+        klass: &JClass<'_>,
     ) -> crate::Result<JvmtiArray<jclass>> {
         let mut count: jint = 0;
         let mut interfaces_ptr: *mut jclass = core::ptr::null_mut();
@@ -98,7 +97,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetImplementedInterfaces,
-                klass,
+                klass.as_raw(),
                 &mut count,
                 &mut interfaces_ptr
             )
@@ -107,24 +106,24 @@ impl<'local> Env<'local> {
     }
 
     /// Returns whether a class is an interface.
-    pub fn is_interface(&self, klass: jclass) -> crate::Result<bool> {
+    pub fn is_interface(&self, klass: &JClass<'_>) -> crate::Result<bool> {
         let mut result: jboolean = false;
-        unsafe { jvmti_call_check!(self, v1, IsInterface, klass, &mut result) };
+        unsafe { jvmti_call_check!(self, v1, IsInterface, klass.as_raw(), &mut result) };
         Ok(result)
     }
 
     /// Returns whether a class is an array class.
-    pub fn is_array_class(&self, klass: jclass) -> crate::Result<bool> {
+    pub fn is_array_class(&self, klass: &JClass<'_>) -> crate::Result<bool> {
         let mut result: jboolean = false;
-        unsafe { jvmti_call_check!(self, v1, IsArrayClass, klass, &mut result) };
+        unsafe { jvmti_call_check!(self, v1, IsArrayClass, klass.as_raw(), &mut result) };
         Ok(result)
     }
 
     /// Returns the class loader of a class, or `None` for the bootstrap
     /// class loader.
-    pub fn get_class_loader(&self, klass: jclass) -> crate::Result<Option<jobject>> {
+    pub fn get_class_loader(&self, klass: &JClass<'_>) -> crate::Result<Option<jobject>> {
         let mut loader: jobject = core::ptr::null_mut();
-        unsafe { jvmti_call_check!(self, v1, GetClassLoader, klass, &mut loader) };
+        unsafe { jvmti_call_check!(self, v1, GetClassLoader, klass.as_raw(), &mut loader) };
         Ok(if loader.is_null() { None } else { Some(loader) })
     }
 
@@ -141,7 +140,7 @@ impl<'local> Env<'local> {
     /// Returns all classes loaded by a specific class loader.
     pub fn get_class_loader_classes(
         &self,
-        loader: jobject,
+        loader: &JObject<'_>,
     ) -> crate::Result<JvmtiArray<jclass>> {
         let mut count: jint = 0;
         let mut classes_ptr: *mut jclass = core::ptr::null_mut();
@@ -150,7 +149,7 @@ impl<'local> Env<'local> {
                 self,
                 v1,
                 GetClassLoaderClasses,
-                loader,
+                loader.as_raw(),
                 &mut count,
                 &mut classes_ptr
             )
@@ -182,23 +181,24 @@ impl<'local> Env<'local> {
     ///
     /// # Required Capabilities
     /// - `can_retransform_classes`
-    pub fn retransform_classes(&self, classes: &[jclass]) -> crate::Result<()> {
+    pub fn retransform_classes(&self, classes: &[&JClass<'_>]) -> crate::Result<()> {
+        let raw_classes: Vec<jclass> = classes.iter().map(|c| c.as_raw()).collect();
         unsafe {
             jvmti_call_check!(
                 self,
                 v1_1,
                 RetransformClasses,
-                classes.len() as jint,
-                classes.as_ptr()
+                raw_classes.len() as jint,
+                raw_classes.as_ptr()
             )
         };
         Ok(())
     }
 
     /// Returns whether a class can be modified.
-    pub fn is_modifiable_class(&self, klass: jclass) -> crate::Result<bool> {
+    pub fn is_modifiable_class(&self, klass: &JClass<'_>) -> crate::Result<bool> {
         let mut result: jboolean = false;
-        unsafe { jvmti_call_check!(self, v1_1, IsModifiableClass, klass, &mut result) };
+        unsafe { jvmti_call_check!(self, v1_1, IsModifiableClass, klass.as_raw(), &mut result) };
         Ok(result)
     }
 
@@ -207,7 +207,7 @@ impl<'local> Env<'local> {
     /// Returns `(minor_version, major_version)`.
     pub fn get_class_version_numbers(
         &self,
-        klass: jclass,
+        klass: &JClass<'_>,
     ) -> crate::Result<(jint, jint)> {
         let mut minor: jint = 0;
         let mut major: jint = 0;
@@ -216,7 +216,7 @@ impl<'local> Env<'local> {
                 self,
                 v1_1,
                 GetClassVersionNumbers,
-                klass,
+                klass.as_raw(),
                 &mut minor,
                 &mut major
             )
@@ -232,7 +232,7 @@ impl<'local> Env<'local> {
     /// - `can_get_constant_pool`
     pub fn get_constant_pool(
         &self,
-        klass: jclass,
+        klass: &JClass<'_>,
     ) -> crate::Result<(jint, JvmtiArray<c_uchar>)> {
         let mut cp_count: jint = 0;
         let mut byte_count: jint = 0;
@@ -242,7 +242,7 @@ impl<'local> Env<'local> {
                 self,
                 v1_1,
                 GetConstantPool,
-                klass,
+                klass.as_raw(),
                 &mut cp_count,
                 &mut byte_count,
                 &mut bytes_ptr
@@ -257,10 +257,10 @@ impl<'local> Env<'local> {
     ///
     /// # Required Capabilities
     /// - `can_get_source_debug_extension`
-    pub fn get_source_debug_extension(&self, klass: jclass) -> crate::Result<JvmtiString> {
+    pub fn get_source_debug_extension(&self, klass: &JClass<'_>) -> crate::Result<JvmtiString> {
         let mut ptr: *mut c_char = core::ptr::null_mut();
         unsafe {
-            jvmti_call_check!(self, v1, GetSourceDebugExtension, klass, &mut ptr)
+            jvmti_call_check!(self, v1, GetSourceDebugExtension, klass.as_raw(), &mut ptr)
         };
         Ok(unsafe { JvmtiString::new(ptr, self.raw) })
     }

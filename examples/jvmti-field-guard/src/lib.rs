@@ -3,56 +3,65 @@
 //! Sets access watches on `System.out` and `System.err`, logging every
 //! read with the calling method and thread.
 
-use core::ffi::c_char;
 use std::ffi::CStr;
 
-use jvmti2::{agent_onload, Capabilities, Env, Event, EventHandler, EventMode};
+use jvmti2::{
+    agent_onload, Capabilities, Env, Event, EventHandler, EventMode,
+    JClass, JFieldID, JMethodID, JObject, JThread,
+};
 
 struct FieldGuardHandler;
 
 impl EventHandler for FieldGuardHandler {
-    fn vm_init(&self, env: &Env<'_>, _thread: jni_sys::jobject) {
-        if let Err(e) = setup_watches(env) {
+    fn vm_init(
+        &self,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+    ) {
+        if let Err(e) = setup_watches(jvmti_env) {
             tracing::error!("Failed to set field watches: {e}");
         }
     }
 
     fn field_access(
         &self,
-        env: &Env<'_>,
-        _thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+        method: JMethodID,
         _location: jvmti2::sys::jlocation,
-        field_klass: jni_sys::jclass,
-        _object: jni_sys::jobject,
-        field: jni_sys::jfieldID,
+        field_klass: &JClass<'_>,
+        _object: Option<&JObject<'_>>,
+        field: JFieldID,
     ) {
-        let field_desc = describe_field(env, field_klass, field);
-        let caller = if method.is_null() {
+        let field_desc = describe_field(jvmti_env, field_klass, field);
+        let caller = if method.into_raw().is_null() {
             "<unknown>".into()
         } else {
-            describe_method(env, method).unwrap_or_else(|_| "<unknown>".into())
+            describe_method(jvmti_env, method).unwrap_or_else(|_| "<unknown>".into())
         };
         tracing::warn!("[ACCESS] {field_desc} read by {caller}");
     }
 
     fn field_modification(
         &self,
-        env: &Env<'_>,
-        _thread: jni_sys::jobject,
-        method: jni_sys::jmethodID,
+        jvmti_env: &Env<'_>,
+        _jni_env: &mut jni::EnvUnowned<'_>,
+        _thread: &JThread<'_>,
+        method: JMethodID,
         _location: jvmti2::sys::jlocation,
-        field_klass: jni_sys::jclass,
-        _object: jni_sys::jobject,
-        field: jni_sys::jfieldID,
-        _signature_type: c_char,
+        field_klass: &JClass<'_>,
+        _object: Option<&JObject<'_>>,
+        field: JFieldID,
+        _signature_type: char,
         _new_value: jni_sys::jvalue,
     ) {
-        let field_desc = describe_field(env, field_klass, field);
-        let caller = if method.is_null() {
+        let field_desc = describe_field(jvmti_env, field_klass, field);
+        let caller = if method.into_raw().is_null() {
             "<unknown>".into()
         } else {
-            describe_method(env, method).unwrap_or_else(|_| "<unknown>".into())
+            describe_method(jvmti_env, method).unwrap_or_else(|_| "<unknown>".into())
         };
         tracing::error!("[MODIFY] {field_desc} written by {caller}");
     }
@@ -60,16 +69,18 @@ impl EventHandler for FieldGuardHandler {
 
 fn setup_watches(env: &Env<'_>) -> jvmti2::Result<()> {
     let classes = env.get_loaded_classes()?;
-    for &klass in classes.as_slice() {
-        let (sig, _) = env.get_class_signature(klass)?;
+    for &klass_raw in classes.as_slice() {
+        let klass = unsafe { jvmti2::jclass_from_raw(klass_raw) };
+        let (sig, _) = env.get_class_signature(&klass)?;
         if sig.to_string_lossy() == "Ljava/lang/System;" {
-            let fields = env.get_class_fields(klass)?;
-            for &fid in fields.as_slice() {
-                let (name, _, _) = env.get_field_name(klass, fid)?;
+            let fields = env.get_class_fields(&klass)?;
+            for &fid_raw in fields.as_slice() {
+                let fid = unsafe { JFieldID::from_raw(fid_raw) };
+                let (name, _, _) = env.get_field_name(&klass, fid)?;
                 let name_str = name.to_string_lossy();
                 if name_str == "out" || name_str == "err" {
                     tracing::info!("Setting access watch on System.{name_str}");
-                    env.set_field_access_watch(klass, fid)?;
+                    env.set_field_access_watch(&klass, fid)?;
                 }
             }
             break;
@@ -78,7 +89,7 @@ fn setup_watches(env: &Env<'_>) -> jvmti2::Result<()> {
     Ok(())
 }
 
-fn describe_field(env: &Env<'_>, klass: jni_sys::jclass, field: jni_sys::jfieldID) -> String {
+fn describe_field(env: &Env<'_>, klass: &JClass<'_>, field: JFieldID) -> String {
     let class_name = env
         .get_class_signature(klass)
         .map(|(sig, _)| format_class_name(&sig.to_string_lossy()))
@@ -90,10 +101,10 @@ fn describe_field(env: &Env<'_>, klass: jni_sys::jclass, field: jni_sys::jfieldI
     format!("{class_name}.{field_name}")
 }
 
-fn describe_method(env: &Env<'_>, method: jni_sys::jmethodID) -> jvmti2::Result<String> {
+fn describe_method(env: &Env<'_>, method: JMethodID) -> jvmti2::Result<String> {
     let (name, _sig, _generic) = env.get_method_name(method)?;
     let klass = env.get_method_declaring_class(method)?;
-    let (class_sig, _generic) = env.get_class_signature(klass)?;
+    let (class_sig, _generic) = env.get_class_signature(&klass)?;
     let class_name = format_class_name(&class_sig.to_string_lossy());
     Ok(format!("{class_name}.{name}"))
 }

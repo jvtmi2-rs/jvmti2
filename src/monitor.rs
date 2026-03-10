@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use jni::sys::jlong;
+use jni_sys::jlong;
 
 use crate::{errors::JvmtiError, sys};
 

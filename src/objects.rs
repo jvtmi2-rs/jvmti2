@@ -85,3 +85,34 @@ bind_jvmti_type! {
 
 // Re-export commonly-used jni-rs types for convenience.
 pub use jni::objects::{JClass, JObject, JString};
+pub use jni::ids::{JFieldID, JMethodID};
+pub use jni::JValue;
+
+/// Creates a [`JObject`] from a raw `jobject` without needing `&jni::Env`.
+///
+/// In jni 0.22, [`JObject::from_raw`] requires `&Env` for lifetime tracking,
+/// but `JObject` is `#[repr(transparent)]` over `jobject` + `PhantomData` so
+/// the env is never actually read.  JVMTI callbacks receive raw pointers
+/// without a `jni::Env`, making this helper necessary.
+///
+/// # Safety
+///
+/// Same requirements as [`JObject::from_raw`]: `raw` must be a valid local
+/// reference (or null) that will not outlive `'a`.
+pub unsafe fn jobject_from_raw<'a>(raw: jni_sys::jobject) -> jni::objects::JObject<'a> {
+    // Safety: JObject is #[repr(transparent)] over jobject + PhantomData<&'a ()>.
+    std::mem::transmute(raw)
+}
+
+/// Creates a [`JClass`] from a raw `jclass` without needing `&jni::Env`.
+///
+/// See [`jobject_from_raw`] for rationale.
+///
+/// # Safety
+///
+/// Same requirements as [`JClass::from_raw`].
+pub unsafe fn jclass_from_raw<'a>(raw: jni_sys::jclass) -> jni::objects::JClass<'a> {
+    // Safety: JClass is #[repr(transparent)] over JObject which is
+    // #[repr(transparent)] over jclass + PhantomData.
+    std::mem::transmute(raw)
+}

@@ -10,7 +10,7 @@ members = [
 
 [package]
 name = "jvmti2"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Aslan Gurtsiev"]
 edition = "2021"
 rust-version = "1.70"

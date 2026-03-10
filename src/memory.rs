@@ -6,7 +6,7 @@
 use core::ffi::{c_char, c_uchar, CStr};
 use std::marker::PhantomData;
 
-use jni::sys::jint;
+use jni_sys::jint;
 
 use crate::sys;
 
